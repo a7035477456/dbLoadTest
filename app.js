@@ -39,7 +39,7 @@ app.get('/run-test', async (req, res) => {
   let ran = 0;
   let exceptions = 0;
 
-  console.log(`[${SERVER_ID}] [Req ${currentRequestId}] Starting test run for 60 seconds...`);
+  //console.log(`[${SERVER_ID}] [Req ${currentRequestId}] Starting test run for 60 seconds...`);
 
   while (Date.now() - startTime < oneMinute) {
     const sourceString = generateRandomString(50);
@@ -87,7 +87,7 @@ app.get('/run-test', async (req, res) => {
            WHERE test_name = $1`,
           [testName]
         );
-        console.log(`[${SERVER_ID}] [Req ${currentRequestId}] Fail recorded`);
+        //console.log(`[${SERVER_ID}] [Req ${currentRequestId}] Fail recorded`);
         fail++;
         process.stdout.write('+');
       }
@@ -103,7 +103,7 @@ app.get('/run-test', async (req, res) => {
          WHERE test_name = $1`,
         [testName]
       );
-      console.log(`[${SERVER_ID}] [Req ${currentRequestId}] Exception recorded`);
+      //console.log(`[${SERVER_ID}] [Req ${currentRequestId}] Exception recorded`);
       exceptions++;
       process.stdout.write('E');
 
