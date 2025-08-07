@@ -82,7 +82,7 @@ app.get('/run-test', async (req, res) => {
           [testName]
         );
         success++;
-        process.stdout.write('.');
+        //process.stdout.write('.');
       } else {
         // mismatch → fail
         await pool.query(
