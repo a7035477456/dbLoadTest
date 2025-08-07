@@ -1,0 +1,123 @@
+require('dotenv').config();
+const http = require('http');
+const os = require('os');
+const express = require('express');
+const { Pool } = require('pg');
+
+// Initialize Express
+const app = express();
+
+// Determine hostname and primary IPv4 address
+const hostname = os.hostname();
+const networkInterfaces = os.networkInterfaces();
+let ip = 'unknown';
+for (const ifaceList of Object.values(networkInterfaces)) {
+  for (const iface of ifaceList) {
+    if (iface.family === 'IPv4' && !iface.internal) {
+      ip = iface.address;
+      break;
+    }
+  }
+  if (ip !== 'unknown') break;
+}
+
+// Database connection pools
+const localPool = new Pool({
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+});
+
+// Determine which node is the other one
+const isNodeA = hostname.includes('node-a') || ip === '192.168.174.204';
+const otherNodeConfig = {
+  host: isNodeA ? '192.168.174.205' : '192.168.174.204',
+  port: process.env.DB_PORT,
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+};
+
+const otherNodePool = new Pool(otherNodeConfig);
+
+// Increment visit count and return updated user on GET /
+app.get('/', async (req, res) => {
+  try {
+    // Increment counter on local node
+    const { rows: localRows } = await localPool.query(
+      `UPDATE public.users
+       SET count = count + 1
+       WHERE id = 1
+       RETURNING name, email, count;`
+    );
+    
+    // Get counter from other node
+    let otherNodeCount = 0;
+    try {
+      const { rows: otherRows } = await otherNodePool.query(
+        `SELECT count FROM public.users WHERE id = 1;`
+      );
+      otherNodeCount = otherRows[0].count;
+    } catch (err) {
+      console.error('Error querying other node:', err);
+      otherNodeCount = 'unavailable';
+    }
+    
+    const user = localRows[0];
+    res.send(`
+      <h1>Database Replication Test</h1>
+      <p>Hello ${user.name} (${user.email})</p>
+      <p>Local node (${hostname}) count = ${user.count}</p>
+      <p>Other node count = ${otherNodeCount}</p>
+      ${user.count === otherNodeCount ? '<p style="color:green;">✅ Replication working!</p>' : '<p style="color:red;">⚠️ Replication issue!</p>'}
+    `);
+  } catch (err) {
+    console.error('Error updating count:', err);
+    res.status(500).send('Internal Server Error');
+  }
+});
+
+// Status endpoint to check both nodes
+app.get('/status', async (req, res) => {
+  try {
+    // Get data from local node
+    const { rows: localRows } = await localPool.query(
+      `SELECT name, email, count FROM public.users WHERE id = 1;`
+    );
+    
+    // Get data from other node
+    let otherNodeData = null;
+    try {
+      const { rows: otherRows } = await otherNodePool.query(
+        `SELECT name, email, count FROM public.users WHERE id = 1;`
+      );
+      otherNodeData = otherRows[0];
+    } catch (err) {
+      console.error('Error querying other node:', err);
+      otherNodeData = { error: 'Unable to reach other node' };
+    }
+    
+    const localData = localRows[0];
+    res.send({
+      localNode: {
+        hostname,
+        ip,
+        data: localData
+      },
+      otherNode: otherNodeData,
+      replicationStatus: (otherNodeData.count === undefined) ? 
+        'Unable to verify' : 
+        (localData.count === otherNodeData.count ? 'In sync' : 'Out of sync')
+    });
+  } catch (err) {
+    console.error('Error fetching status:', err);
+    res.status(500).send('Internal Server Error');
+  }
+});
+
+// Start HTTP server on port 80
+http.createServer(app).listen(80, () => {
+  console.log(`✅ HTTP server on ${hostname} (${ip}) running on port 80`);
+});

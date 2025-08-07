@@ -1,0 +1,45 @@
+const express = require('express');
+const { Pool } = require('pg');
+const dotenv = require('dotenv');
+
+// Load env vars
+dotenv.config();
+
+const app = express();
+const port = 40000; // HAProxy expects this
+
+// Identify the host (customize this line per machine)
+const SERVER_ID = 'xbox3';  // <- Change to xbox4 or xbox5 on each box
+
+const pool = new Pool({
+  host: process.env.DB_HOST,     // 192.168.230.204
+  port: Number(process.env.DB_PORT), // 50005
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+});
+
+app.get('/users', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM users ORDER BY id DESC LIMIT 10');
+    res.json({
+      from: SERVER_ID,
+      data: result.rows,
+    });
+  } catch (err) {
+    console.error(`[${SERVER_ID}] Database error:`, err);
+    res.status(500).send(`[${SERVER_ID}] Database error`);
+  }
+});
+
+
+app.get('/', (req, res) => {
+    res.status(200).send('OK');
+});
+
+app.listen(port, () => {
+  console.log(`App running on ${SERVER_ID}, listening on port ${port}, using centralized DB`);
+});
+
+
+

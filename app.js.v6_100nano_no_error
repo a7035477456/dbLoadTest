@@ -1,0 +1,103 @@
+const express = require('express');
+const { Pool } = require('pg');
+const dotenv = require('dotenv');
+
+// Load environment variables
+dotenv.config();
+
+const app = express();
+const port = 40000;
+const SERVER_ID = 'xbox5';  // Update this if needed
+
+const pool = new Pool({
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT),
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  ssl: {rejectUnauthorized: false},
+});
+
+function generateRandomString(length = 10) {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
+
+app.get('/run-test', async (req, res) => {
+  const startTime = Date.now();
+  const oneMinute = 60 * 1000;
+
+  let success = 0;
+  let fail = 0;
+  let ran = 0;
+
+  console.log(`[${SERVER_ID}] Starting test run for 60 seconds...`);
+
+  while (Date.now() - startTime < oneMinute) {
+    const sourceString = generateRandomString(10);
+
+    try {
+      //console.log(`[${SERVER_ID}] Generated sourceString: ${sourceString}`);
+
+      await pool.query(
+        `UPDATE users SET test_string = $1 WHERE test_name = 'test 1'`,
+        [sourceString]
+      );
+      //console.log(`[${SERVER_ID}] Updated test_string to: ${sourceString}`);
+
+      const result = await pool.query(`SELECT * FROM users WHERE test_name = 'test 1'`);
+      const row = result.rows[0];
+
+      if (!row) {
+        console.warn(`[${SERVER_ID}] Row with test_name='test 1' not found.`);
+        continue;
+      }
+
+      const dbString = (row.test_string || '').trim();
+      const match = dbString === sourceString;
+
+      //console.log(`[${SERVER_ID}] Fetched test_string from DB: ${dbString}`);
+      //console.log(`[${SERVER_ID}] Match? ${match ? 'YES' : 'NO'}`);
+
+      if (match) {
+        await pool.query(
+          `UPDATE users
+           SET count_success = count_success + 1,
+               integration_ran = integration_ran + 1,
+               test_string = NULL
+           WHERE test_name = 'test 1'`
+        );
+        //console.log(`[${SERVER_ID}] ✅ Success recorded`);
+        success++;
+      } else {
+        await pool.query(
+          `UPDATE users
+           SET count_fail = count_fail + 1,
+               integration_ran = integration_ran + 1,
+               test_string = NULL
+           WHERE test_name = 'test 1'`
+        );
+        console.log(`[${SERVER_ID}] ❌ Fail recorded`);
+        fail++;
+      }
+
+      ran++;
+    } catch (err) {
+      console.error(`[${SERVER_ID}] ❗ Error: ${err.message}`);
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+
+  console.log(`[${SERVER_ID}] Test completed. Success=${success}, Fail=${fail}, Ran=${ran}`);
+  res.json({ success, fail, ran });
+});
+
+app.get('/', (req, res) => {
+  res.status(200).send('OK');
+});
+
+app.listen(port, () => {
+  console.log(`[${SERVER_ID}] Server running on port ${port}`);
+});
+

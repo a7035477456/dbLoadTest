@@ -1,0 +1,233 @@
+require('dotenv').config();
+const http = require('http');
+const os = require('os');
+const express = require('express');
+const { Pool } = require('pg');
+
+// Initialize Express
+const app = express();
+
+// Determine hostname and primary IPv4 address
+const hostname = os.hostname();
+const networkInterfaces = os.networkInterfaces();
+let ip = 'unknown';
+for (const ifaceList of Object.values(networkInterfaces)) {
+  for (const iface of ifaceList) {
+    if (iface.family === 'IPv4' && !iface.internal) {
+      ip = iface.address;
+      break;
+    }
+  }
+  if (ip !== 'unknown') break;
+}
+
+// Database connection pools
+const localPool = new Pool({
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+});
+
+// Master (publisher) node configuration - always 192.168.174.204
+const masterPool = new Pool({
+  host: '192.168.174.204',
+  port: process.env.DB_PORT,
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+});
+
+// Add JavaScript for all interactive functionality
+const clientScript = `
+<script>
+  async function updateCount() {
+    const newCount = document.getElementById('count').value;
+    try {
+      const response = await fetch('/update-count?count=' + newCount);
+      const data = await response.json();
+      
+      // Update the local count display
+      document.getElementById('local-count').textContent = data.newCount;
+      
+      // Refresh both counts to show updated values
+      await refreshCount('local');
+      await refreshCount('master');
+    } catch (error) {
+      console.error('Error updating count:', error);
+    }
+  }
+
+  async function refreshCount(type) {
+    try {
+      const response = await fetch('/get-count?type=' + type);
+      const data = await response.json();
+      document.getElementById(type + '-count').textContent = data.count;
+      updateSyncStatus();
+    } catch (error) {
+      console.error('Error refreshing count:', error);
+    }
+  }
+
+  function updateSyncStatus() {
+    const localCount = parseInt(document.getElementById('local-count').textContent);
+    const masterCount = parseInt(document.getElementById('master-count').textContent);
+    const statusElement = document.getElementById('sync-status');
+    
+    if (isNaN(localCount) || isNaN(masterCount)) {
+      statusElement.innerHTML = '<span class="error">⚠️ Unable to verify</span>';
+    } else if (localCount === masterCount) {
+      statusElement.innerHTML = '<span class="success">✅ Replication working!</span>';
+    } else {
+      statusElement.innerHTML = '<span class="error">⚠️ Replication issue!</span>';
+    }
+  }
+</script>
+`;
+
+// Add this smartQuery method to your code
+const dbPool = {
+  smartQuery: async (queryText, values = []) => {
+    try {
+      // Normalize the query to check first word
+      const firstWord = queryText.trim().split(/\s+/)[0].toUpperCase();
+      
+      // Route to appropriate pool
+      if (['SELECT'].includes(firstWord)) {
+        console.log(`Routing to LOCAL pool: ${queryText}`);
+        return await localPool.query(queryText, values);
+      } 
+      else if (['UPDATE', 'INSERT', 'DELETE', 'PATCH'].includes(firstWord)) {
+        console.log(`Routing to MASTER pool: ${queryText}`);
+        return await masterPool.query(queryText, values);
+      }
+      else {
+        // Default to local pool for other operations
+        console.log(`Routing to LOCAL pool (default): ${queryText}`);
+        return await localPool.query(queryText, values);
+      }
+    } catch (err) {
+      console.error('Error in smartQuery:', err);
+      throw err; // Re-throw for handling in the endpoint
+    }
+  }
+};
+
+// Modified endpoints using smartQuery
+app.get('/update-count', async (req, res) => {
+  try {
+    const newCount = parseInt(req.query.count);
+    await dbPool.smartQuery(
+      'UPDATE public.users SET count = $1 WHERE id = 1;',
+      [newCount]
+    );
+    res.json({ success: true, newCount });
+  } catch (err) {
+    console.error('Error updating count:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.get('/get-count', async (req, res) => {
+  try {
+    let count;
+    if (req.query.type === 'local') {
+      const { rows } = await dbPool.smartQuery(
+        'SELECT count FROM public.users WHERE id = 1;'
+      );
+      count = rows[0].count;
+    } else if (req.query.type === 'master') {
+      // Force master query when specifically requested
+      const { rows } = await masterPool.query(
+        'SELECT count FROM public.users WHERE id = 1;'
+      );
+      count = rows[0].count;
+    } else {
+      return res.status(400).json({ error: 'Invalid type' });
+    }
+    res.json({ count });
+  } catch (err) {
+    console.error('Error getting count:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+// Home route - shows the interface
+app.get('/', async (req, res) => {
+  try {
+    // Get initial counts
+    const { rows: localRows } = await localPool.query(
+      `SELECT count FROM public.users WHERE id = 1;`
+    );
+    const currentCount = localRows[0].count;
+
+    let masterCount;
+    try {
+      const { rows: masterRows } = await masterPool.query(
+        `SELECT count FROM public.users WHERE id = 1;`
+      );
+      masterCount = masterRows[0].count;
+    } catch (err) {
+      console.error('Error querying master node:', err);
+      masterCount = 'unavailable';
+    }
+
+    // Render the response
+    const responseHtml = `
+      <html>
+        <head>
+          <title>PostgreSQL Replication Test</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            .counters { margin-top: 20px; border: 1px solid #ccc; padding: 15px; border-radius: 5px; }
+            .counter { margin: 5px 0; display: flex; align-items: center; }
+            .counter-value { min-width: 50px; display: inline-block; }
+            .btn { margin-left: 10px; padding: 5px 10px; cursor: pointer; }
+            .refresh-btn { font-size: 12px; }
+            .success { color: green; }
+            .error { color: red; }
+            .input-group { margin-bottom: 15px; }
+          </style>
+          ${clientScript}
+        </head>
+        <body>
+          <h1>Node B (xx205) PostgreSQL Replication Test</h1>
+          
+          <div class="input-group">
+            <label for="count">Count:</label>
+            <input type="number" id="count" value="${currentCount}">
+            <button class="btn" onclick="updateCount()">Update</button>
+          </div>
+          
+          <div class="counters">
+            <div class="counter">
+              <strong>Count Local DB (${hostname}):</strong> 
+              <span id="local-count" class="counter-value">${currentCount}</span>
+              <button class="btn refresh-btn" onclick="refreshCount('local')">Select Local DB</button>
+            </div>
+            <div class="counter">
+              <strong>Count Master DB (192.168.174.204):</strong> 
+              <span id="master-count" class="counter-value">${masterCount}</span>
+              <button class="btn refresh-btn" onclick="refreshCount('master')">Select Master DB</button>
+            </div>
+            <div class="counter" id="sync-status">
+              ${masterCount === currentCount ? 
+                '<span class="success">✅ Replication working!</span>' : 
+                '<span class="error">⚠️ Replication issue!</span>'}
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    res.send(responseHtml);
+  } catch (err) {
+    console.error('Error:', err);
+    res.status(500).send('Internal Server Error');
+  }
+});
+
+// Start HTTP server on port 80
+http.createServer(app).listen(80, () => {
+  console.log(`✅ HTTP server on ${hostname} (${ip}) running on port 80`);
+});
