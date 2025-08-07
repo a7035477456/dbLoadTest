@@ -43,7 +43,8 @@ app.get('/run-test', async (req, res) => {
   let exceptions = 0;
 
   // LOOP RESTORED: run for one minute
-  while (Date.now() - startTime < oneMinute) {
+  //while (Date.now() - startTime < oneMinute) 
+  {
     const sourceString = generateRandomString(50);
 
     // Move these out so they're visible in both try and catch
@@ -121,7 +122,8 @@ app.get('/run-test', async (req, res) => {
     );
   }
 
-  // summary log
+  // summary logi
+  /*
   const timestamp = new Date()
     .toLocaleString('en-US', {
       month: 'long',
@@ -136,6 +138,7 @@ app.get('/run-test', async (req, res) => {
     `${timestamp} [${SERVER_ID}] [Req ${currentRequestId}] Test complete: ` +
       `Success=${success}, Fail=${fail}, Ran=${ran}, Exceptions=${exceptions}`
   );
+  */
 
   res.json({ success, fail, ran, exceptions });
 });
