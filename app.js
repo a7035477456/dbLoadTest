@@ -116,10 +116,16 @@ app.get('/run-test', async (req, res) => {
     );
   }
 
-  console.log(
-    `[${SERVER_ID}] [Req ${currentRequestId}] Test complete: ` +
-    `Success=${success}, Fail=${fail}, Ran=${ran}, Exceptions=${exceptions}`
-  );
+const timestamp = new Date().toLocaleString("en-US", {
+  month: "long", day: "numeric", year: "numeric",
+  hour: "numeric", minute: "2-digit", hour12: true
+}).replace(/,/g, "");
+console.log(
+  `${timestamp} [${SERVER_ID}] [Req ${currentRequestId}] Test complete: ` +
+  `Success=${success}, Fail=${fail}, Ran=${ran}, Exceptions=${exceptions}`
+);
+
+
   res.json({ success, fail, ran, exceptions });
 });
 
