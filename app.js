@@ -40,12 +40,12 @@ app.get('/run-test', async (req, res) => {
 console.log(`[${SERVER_ID}] [Req ${currentRequestId}] Starting test run for 60 seconds...`);
 	
   while (Date.now() - startTime < oneMinute) {
-    const sourceString = generateRandomString(10);
+    const sourceString = generateRandomString(50);
 
     try {
 
         // Pick a random test name between "test 1" to "test 10"
-  const testNumber = Math.floor(Math.random() * 10) + 1;
+  const testNumber = Math.floor(Math.random() * 1000) + 1;
   const testName = `test ${testNumber}`;
 
       await pool.query(
@@ -89,10 +89,25 @@ console.log(`[${SERVER_ID}] [Req ${currentRequestId}] Starting test run for 60 s
 
       ran++;
     } catch (err) {
+        await pool.query(
+          `UPDATE users
+           SET count_fail = count_fail + 1,
+               integration_ran = integration_ran + 1,
+               test_string = NULL
+           WHERE test_name = $1`,
+          [testName]
+        );
+        console.log(`[${SERVER_ID}] [Req ${currentRequestId}] ?~]~L Fail recorded`);
+        fail++;
+
+
       console.error(`[${SERVER_ID}] [Req ${currentRequestId}] ❗ Error: ${err.message}`);
     }
 
-    await new Promise(resolve => setTimeout(resolve, 100));
+ await new Promise(resolve =>
+  setTimeout(resolve, Math.floor(Math.random() * 30000) + 1000)
+);
+
   }
 
   console.log(`[${SERVER_ID}] [Req ${currentRequestId}] ✅ Test complete: Success=${success}, Fail=${fail}, Ran=${ran}`);
