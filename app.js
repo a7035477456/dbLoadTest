@@ -65,12 +65,11 @@ app.get('/run-test', async (req, res) => {
       );
       const row = result.rows[0];
 
-      if (!row) {
-        console.warn(
-          `[${SERVER_ID}] [Req ${currentRequestId}] Row not found: ${testName}`
-        );
-        continue;  // now legal, jumps to top of while
-      }
+
+    if (!row) {
+      console.warn(`[${SERVER_ID}] [Req ${currentRequestId}] Row not found: ${testName}`);
+      throw new Error(`Row not found: ${testName}`);
+    }
 
       const dbString = (row.test_string || '').trim();
       if (dbString === sourceString) {
