@@ -15,7 +15,11 @@ const pool = new Pool({
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  ssl: { rejectUnauthorized: false },
+  //ssl: { rejectUnauthorized: false },
+  max: 1,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 3000,
+
 });
 
 // Request counter
@@ -23,11 +27,10 @@ let requestCounter = 0;
 
 function generateRandomString(length = 10) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  return Array.from({ length }, () =>
+    chars[Math.floor(Math.random() * chars.length)]
+  ).join('');
 }
-
-
-
 
 app.get('/run-test', async (req, res) => {
   const currentRequestId = ++requestCounter;
@@ -39,8 +42,7 @@ app.get('/run-test', async (req, res) => {
   let ran = 0;
   let exceptions = 0;
 
-  //console.log(`[${SERVER_ID}] [Req ${currentRequestId}] Starting test run for 60 seconds...`);
-
+  // LOOP RESTORED: run for one minute
   while (Date.now() - startTime < oneMinute) {
     const sourceString = generateRandomString(50);
 
@@ -49,11 +51,13 @@ app.get('/run-test', async (req, res) => {
     const testName = `test ${testNumber}`;
 
     try {
+      // write the random string
       await pool.query(
         `UPDATE users SET test_string = $1 WHERE test_name = $2`,
         [sourceString, testName]
       );
 
+      // read it back
       const result = await pool.query(
         `SELECT * FROM users WHERE test_name = $1`,
         [testName]
@@ -61,53 +65,54 @@ app.get('/run-test', async (req, res) => {
       const row = result.rows[0];
 
       if (!row) {
-        console.warn(`[${SERVER_ID}] [Req ${currentRequestId}] Row not found: ${testName}`);
-        continue;
+        console.warn(
+          `[${SERVER_ID}] [Req ${currentRequestId}] Row not found: ${testName}`
+        );
+        continue;  // now legal, jumps to top of while
       }
 
       const dbString = (row.test_string || '').trim();
       if (dbString === sourceString) {
+        // success
         await pool.query(
           `UPDATE users
-             SET count_success      = count_success + 1,
-                 integration_ran    = integration_ran + 1,
-                 test_string        = NULL
+             SET count_success   = count_success + 1,
+                 integration_ran = integration_ran + 1
            WHERE test_name = $1`,
           [testName]
         );
         success++;
-
-        process.stdout.write('+');
+        process.stdout.write('.');
       } else {
+        // mismatch → fail
         await pool.query(
           `UPDATE users
-             SET count_fail         = count_fail + 1,
-                 integration_ran    = integration_ran + 1,
-                 test_string        = NULL
+             SET count_fail      = count_fail + 1,
+                 integration_ran = integration_ran + 1,
+                 test_string     = NULL
            WHERE test_name = $1`,
           [testName]
         );
-        //console.log(`[${SERVER_ID}] [Req ${currentRequestId}] Fail recorded`);
         fail++;
         process.stdout.write('+');
       }
 
       ran++;
     } catch (err) {
-      // Increment the exception counter in the database and locally
+      // exception
       await pool.query(
         `UPDATE users
-           SET count_exception    = count_exception + 1,
-               integration_ran    = integration_ran + 1,
-               test_string        = NULL
+           SET count_exception = count_exception + 1,
+               integration_ran = integration_ran + 1,
+               test_string     = NULL
          WHERE test_name = $1`,
         [testName]
       );
-      //console.log(`[${SERVER_ID}] [Req ${currentRequestId}] Exception recorded`);
       exceptions++;
       process.stdout.write('E');
-
-      console.error(`[${SERVER_ID}] [Req ${currentRequestId}] Error: ${err.message}`);
+      console.error(
+        `[${SERVER_ID}] [Req ${currentRequestId}] Error: ${err.message}`
+      );
     }
 
     // random sleep between 1s and 30s
@@ -116,15 +121,21 @@ app.get('/run-test', async (req, res) => {
     );
   }
 
-const timestamp = new Date().toLocaleString("en-US", {
-  month: "long", day: "numeric", year: "numeric",
-  hour: "numeric", minute: "2-digit", hour12: true
-}).replace(/,/g, "");
-console.log(
-  `${timestamp} [${SERVER_ID}] [Req ${currentRequestId}] Test complete: ` +
-  `Success=${success}, Fail=${fail}, Ran=${ran}, Exceptions=${exceptions}`
-);
-
+  // summary log
+  const timestamp = new Date()
+    .toLocaleString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    })
+    .replace(/,/g, '');
+  console.log(
+    `${timestamp} [${SERVER_ID}] [Req ${currentRequestId}] Test complete: ` +
+      `Success=${success}, Fail=${fail}, Ran=${ran}, Exceptions=${exceptions}`
+  );
 
   res.json({ success, fail, ran, exceptions });
 });
