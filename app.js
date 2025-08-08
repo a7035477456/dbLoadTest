@@ -9,6 +9,7 @@ const app = express();
 const port = 40000;
 const SERVER_ID = 'xbox5';  // Update this if needed
 
+/*
 const pool = new Pool({
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT),
@@ -16,11 +17,24 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   //ssl: { rejectUnauthorized: false },
-  max: 1,
+  max: 50,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 0,
+});
+*/
+
+const pool = new Pool({
+  host: 'IP_OF_PGBOUNCER_BOX',
+  port: 6432,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  max: 50,                 // per Node worker
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 3000,
-
 });
+
+
 
 // Request counter
 let requestCounter = 0;
@@ -45,6 +59,13 @@ app.get('/run-test', async (req, res) => {
   // LOOP RESTORED: run for one minute
   //while (Date.now() - startTime < oneMinute) 
   {
+
+
+    // random sleep between 1s and 30s
+    await new Promise(resolve =>
+      setTimeout(resolve, Math.floor(Math.random() * 30000) + 1000)
+    );
+
     const sourceString = generateRandomString(50);
 
     // Move these out so they're visible in both try and catch
@@ -115,10 +136,6 @@ app.get('/run-test', async (req, res) => {
       );
     }
 
-    // random sleep between 1s and 30s
-    await new Promise(resolve =>
-      setTimeout(resolve, Math.floor(Math.random() * 30000) + 1000)
-    );
   }
 
   // summary logi
@@ -149,4 +166,5 @@ app.get('/', (req, res) => {
 app.listen(port, () => {
   console.log(`[${SERVER_ID}] Server running on port ${port}`);
 });
-
+server.keepAliveTimeout = 65000;
+server.headersTimeout   = 66000; // must be > keepAliveTimeout
